@@ -36,4 +36,4 @@ pivot_pct = pivot_subs.div(size, axis=0).mul(100).round(1)
 
 period_cols = [f"Period {p}" for p in pivot_subs.columns]
 pivot_subs.columns = period_cols
-pivot_pct.columns  = period_c
+pivot_pct.columns  = period_cols
