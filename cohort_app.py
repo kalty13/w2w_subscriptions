@@ -60,12 +60,13 @@ cmap = cm.get_cmap("Reds")
 
 fill_colors = [["white"] * len(header)]               # строка заголовков
 for row in pct_matrix:
-    row_colors = ["white"]                            # столбец Cohort size
+    row_colors = ["white", "white"]                  # Cohort + Cohort size
     row_colors += [
         f"rgba{tuple((np.array(cmap(v)) * 255).astype(int))}"
         for v in row
     ]
     fill_colors.append(row_colors)
+
 
 # ───────────────────────────────
 # 3. Рисуем Plotly Table
