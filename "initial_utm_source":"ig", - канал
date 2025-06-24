@@ -1,0 +1,13 @@
+"initial_utm_source":"ig", 	- канал									
+"initial_utm_campaign":"SOWL_W2W_T1_PURCH_NC_12.06.25_AAA+(120225169773820788)", - кампания
+"initial_utm_content":"t1_android+(120225169773810788)", - адсет
+"initial_utm_term":"0016_sOwl_spy_ENG_V_V1_09_1080x1920_05062025+–+Copy+(120225170254820788)" - креатив
+
+0057_AIGO_car_ESP_V_V2_11_1920x1080_23052025
+
+
+https://sowl.mindtest.app/test_iq_tunnel?utm_source=quora&utm_medium={{adset.id}}&utm_campaign={{campaign.id}}&utm_content={{ad.id}}
+
+
+
+https://sowl.mindtest.app/test_iq_tunnel?utm_source=quora&utm_content={{adset.name}}&utm_campaign={{campaign.name}}&utm_term={{ad.name}}

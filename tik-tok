@@ -1,0 +1,51 @@
+tik-tok
+- spend: $400 daily
+- target: LATAM
+- $30 CPP, $1.5-2 Cost per Checkout
+
+
+facebook
+- spend: $450 daily
+- target: LATAM
+- Cost per Checkout: $2.7-3.5
+- Cost per Purachase: $35-45
+
+
+
+	SOWL_WW_IT_SPIZHENO_PROXY		spend: $100			ENG, тест воронки IQ Long vs IQ short
+	SOWL_WW_IT_SPIZHENO_PROXY		spend: $100			ENG, тест воронки IQ Long vs IQ short
+
+
+
+
+https://iqbrain.app/
+https://iq.mental-impulse.com/flow/default_iq✅
+https://iqinternational.org/✅
+https://iqmate.mobi/es/before✅
+https://cerebrumiq.com/✅
+https://quiz.theliven.com/en/
+
+собрал все рефы в один борд, на пейволле предлагаю собрать такой лейаут,
+новый элемент с чуваками (@Anastasia Ovcharenko уже нарисовала)
+прайс лист
+фейк-резалт (тот что у нас под замком и с блюром)
+
+python -m venv .venv && source .venv/bin/activate
+pip install browser-use "browser-use[memory]"          
+playwright install chromium --with-deps --no-shell     
+echo "OPENAI_API_KEY=sk-..." > .env                    
+
+
+https://sowl.mindtest.app/
+
+ SOWL_W2W_WW-en_PURCH_IK_170625_291317110545925_AAA (120225580543580788)
+
+test_iq_tunnel?utm_source=quora&utm_medium={{adset.id}}&utm_campaign={{campaign.id}}&utm_content={{ad.id}}
+
+
+
+Can you beat the average IQ (98)?
+Take the test now and find out!
+
+https://sowl.mindtest.app/test_iq_tunnel?utm_source=quora&utm_medium={{adset.id}}&utm_campaign={{campaign.id}}&utm_content={{ad.id}}
+
