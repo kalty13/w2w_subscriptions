@@ -21,28 +21,35 @@ rows = [
 exp = pd.DataFrame(rows, columns=["cohort_date", "period"])
 size = exp[exp.period == 0].groupby("cohort_date").size()
 
+# ────────────────────────────────
+# СТАРЫЙ БЛОК (pivot_subs / pct) ЗАМЕНЯЕМ НА НОВЫЙ
+# ────────────────────────────────
 pivot_subs = exp.pivot_table(
     index="cohort_date", columns="period", aggfunc="size", fill_value=0
 )
 pivot_pct = pivot_subs.div(size, axis=0).mul(100).round(1)
 
-st.title("Cohort Retention (real_payment = 1)")
+# 1) красивое имя колонок
+pivot_subs.columns = [f"Period {p}" for p in pivot_subs.columns]
+pivot_pct.columns  = [f"Period {p}" for p in pivot_pct.columns]
 
-view = st.radio("Режим:", ("Heat-map %", "Абсолюты + %"))
+# 2) формируем “%  (abs)” строкой c переносом
+combo = pivot_pct.astype(str) + "%\n(" + pivot_subs.astype(str) + ")"
 
-if view == "Heat-map %":
-    fig = px.imshow(
-        pivot_pct.sort_index(ascending=False),
-        labels=dict(x="Period", y="Cohort", color="Ret %"),
-        text_auto=".1f",
-        aspect="auto",
-        color_continuous_scale="Reds"
-    )
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    combo = pivot_subs.astype(int).astype(str) + " (" + pivot_pct.astype(str) + "%)"
-    st.dataframe(
-        combo.sort_index(ascending=False),
-        height=600,
-        use_container_width=True
-    )
+# 3) добавляем первый столбец Cohort size
+combo.insert(0, "Cohort size", size)
+
+# 4) сортировка – свежие когорты сверху
+combo = combo.sort_index(ascending=False)
+
+# ────────────────────────────────
+# ВЫВОД
+# ────────────────────────────────
+st.title("Cohort Retention – real_payment = 1")
+
+st.dataframe(
+    combo,
+    height=700,
+    use_container_width=True
+)
+
