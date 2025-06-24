@@ -6,9 +6,9 @@ import numpy as np
 from pathlib import Path
 
 # ───────────────────────────────
-# 0. Чтение файла с подписками
+# 0. Чтение файла
 # ───────────────────────────────
-FILE = Path(__file__).parent / "subscriptions.tsv"      # CSV? → поменяй расширение
+FILE = Path(__file__).parent / "subscriptions.tsv"      # CSV? поменяй расширение
 
 @st.cache_data(show_spinner=False)
 def load_data(p: Path) -> pd.DataFrame:
@@ -19,10 +19,9 @@ df = load_data(FILE)
 # ───────────────────────────────
 # 1. Подготовка данных
 # ───────────────────────────────
-df = df[df["real_payment"] == 1]                       # фильтруем реальные оплаты
+df = df[df["real_payment"] == 1]                       # реальные оплаты
 df["cohort_date"] = pd.to_datetime(df["created_at"]).dt.date
 
-# разворачиваем на строки period
 rows = [
     (row.cohort_date, period)
     for _, row in df.iterrows()
@@ -36,42 +35,41 @@ pivot_subs = exp.pivot_table(
 )
 pivot_pct = pivot_subs.div(size, axis=0).mul(100).round(1)
 
-# красивые названия колонок
 period_cols = [f"Period {p}" for p in pivot_subs.columns]
 pivot_subs.columns = period_cols
 pivot_pct.columns  = period_cols
 
-# "%\n(abs)" → HTML c переносом
 combo = pivot_pct.astype(str) + "%<br>(" + pivot_subs.astype(str) + ")"
-combo.insert(0, "Cohort size", size)                   # первый столбец – размер
+combo.insert(0, "Cohort size", size)
 combo = combo.sort_index(ascending=False)
 
 # ───────────────────────────────
-# 2. Градиент заливки по % retention
+# 2. Заголовки и содержимое
 # ───────────────────────────────
 header = ["Cohort"] + combo.columns.tolist()
 cohort_labels = combo.index.astype(str).tolist()
 cells = [cohort_labels] + [combo[col].tolist() for col in combo.columns]
 
-# нормализуем проценты 0–1
+# ───────────────────────────────
+# 3. Цвета заливки (только для ячеек, без строки-заголовка)
+# ───────────────────────────────
 pct_matrix = pivot_pct.reindex(combo.index).values / 100.0
 cmap = cm.get_cmap("Reds")
 
-# собираем fill_colors сначала построчно
-fill_colors_rows = [["white"] * len(header)]  # строка заголовков
+fill_colors_rows = []
 for row in pct_matrix:
-    row_colors = ["white", "white"]           # Cohort + Cohort size
+    row_colors = ["white", "white"]                     # Cohort + Cohort size
     row_colors += [
         f"rgba{tuple((np.array(cmap(v)) * 255).astype(int))}"
         for v in row
     ]
     fill_colors_rows.append(row_colors)
 
-# транспонируем: Plotly Table ждёт цвета-по-колонкам
+# транспонируем: Plotly ждёт цвета-по-колонкам
 fill_colors = list(map(list, zip(*fill_colors_rows)))
 
 # ───────────────────────────────
-# 3. Plotly Table
+# 4. Plotly Table
 # ───────────────────────────────
 fig = go.Figure(
     data=[
