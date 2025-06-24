@@ -8,24 +8,51 @@ import pandas as pd
 import plotly.graph_objects as go
 from matplotlib import cm
 from pathlib import Path
+from datetime import date
 
-# ───────────────────────────────
-# 0. Чтение локального файла
-# ───────────────────────────────
-FILE = Path(__file__).parent / "subscriptions.tsv"        # CSV? → поменяй расширение
+# ──────────────────────────────────────────
+# 0. Загрузка данных
+# ──────────────────────────────────────────
+FILE = Path(__file__).parent / "subscriptions.tsv"      # CSV? → меняй расширение
 
 @st.cache_data(show_spinner=False)
 def load_data(p: Path) -> pd.DataFrame:
-    # CSV → убери sep="\t" или замени на ","
     return pd.read_csv(p, sep="\t")
 
-df = load_data(FILE)
+df_raw = load_data(FILE)
+df_raw["created_at"] = pd.to_datetime(df_raw["created_at"])
 
-# ───────────────────────────────
-# 1. Подготовка данных
-# ───────────────────────────────
-df = df[df["real_payment"] == 1]
-df["cohort_date"] = pd.to_datetime(df["created_at"]).dt.date
+# ──────────────────────────────────────────
+# 1. UI-фильтры
+# ──────────────────────────────────────────
+min_date = df_raw["created_at"].dt.date.min()
+max_date = df_raw["created_at"].dt.date.max()
+
+start, end = st.date_input(
+    "Date range (created_at):",
+    [min_date, max_date],
+    min_value=min_date,
+    max_value=max_date
+)
+
+weekly_toggle = st.checkbox(
+    "Weekly cohorts (instead of daily)",
+    value=False
+)
+
+# ──────────────────────────────────────────
+# 2. Фильтрация и подготовка
+# ──────────────────────────────────────────
+df = df_raw[
+    (df_raw["real_payment"] == 1) &
+    (df_raw["created_at"].dt.date.between(start, end))
+].copy()
+
+if weekly_toggle:
+    # cohort = понедельник недели
+    df["cohort_date"] = df["created_at"].dt.to_period("W").apply(lambda r: r.start_time.date())
+else:
+    df["cohort_date"] = df["created_at"].dt.date
 
 rows = [
     (row.cohort_date, period)
@@ -47,24 +74,20 @@ pivot_pct.columns  = period_cols
 
 combo = pivot_pct.astype(str) + "%<br>(" + pivot_subs.astype(str) + ")"
 combo.insert(0, "Cohort size", size)
-combo = combo.sort_index(ascending=False)                 # свежие когорты сверху
+combo = combo.sort_index(ascending=False)
 
-# ───────────────────────────────
-# 2. Формируем values и цвета
-# ───────────────────────────────
+# ──────────────────────────────────────────
+# 3. colours + table
+# ──────────────────────────────────────────
 header = ["Cohort"] + combo.columns.tolist()
 table_rows, row_colors = [], []
-cmap = cm.get_cmap("RdYlGn_r")            # зелёный → жёлтый → красный
-BASE = "#262626"                          # тёмный фон для пустых/нулевых
+cmap = cm.get_cmap("YlGnBu_r")             # спокойный сине-зелёный
+BASE = "#202020"
 
 for ix, row in combo.iterrows():
-    # values
     table_rows.append([str(ix)] + row.tolist())
-
-    # цвета
     pct_vals = pivot_pct.loc[ix].values / 100.0
-    color_row = ["#1e1e1e", "#1e1e1e"]    # Cohort + Cohort size
-
+    color_row = ["#1e1e1e", "#1e1e1e"]     # cohort / size
     for p in pct_vals:
         if pd.isna(p) or p == 0:
             color_row.append(BASE)
@@ -75,18 +98,14 @@ for ix, row in combo.iterrows():
             )
     row_colors.append(color_row)
 
-# Транспонируем: Plotly ждёт list-of-columns
 values_cols = list(map(list, zip(*table_rows)))
 colors_cols = list(map(list, zip(*row_colors)))
 
-# ───────────────────────────────
-# 3. Plotly Table
-# ───────────────────────────────
 fig = go.Figure(
     data=[go.Table(
         header=dict(
             values=header,
-            fill_color="#202020",
+            fill_color="#303030",
             font=dict(color="white", size=13),
             align="center"
         ),
@@ -99,11 +118,12 @@ fig = go.Figure(
         )
     )],
     layout=go.Layout(
-        paper_bgcolor="#0f0f0f",        # фон страницы
+        paper_bgcolor="#0f0f0f",
         plot_bgcolor="#0f0f0f",
         margin=dict(l=10, r=10, t=40, b=10)
     )
 )
 
-st.title("Cohort Retention – real_payment = 1")
+title_suffix = "weekly" if weekly_toggle else "daily"
+st.title(f"Cohort Retention – real_payment = 1 ({title_suffix})")
 st.plotly_chart(fig, use_container_width=True)
