@@ -49,9 +49,11 @@ combo = combo.sort_index(ascending=False)
 # 2. Градиент заливки по %
 # ───────────────────────────────
 header = ["Cohort"] + combo.columns.tolist()
-cells  = [combo.index.strftime("%Y-%m-%d").tolist()] + [
+cohort_labels = combo.index.astype(str).tolist()      # превращаем даты в строки
+cells = [cohort_labels] + [
     combo[col].tolist() for col in combo.columns
 ]
+
 
 pct_matrix = pivot_pct.reindex(combo.index).values / 100.0
 cmap = cm.get_cmap("Reds")
