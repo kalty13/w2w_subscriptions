@@ -132,31 +132,3 @@ fig_line.update_layout(margin=dict(l=10,r=10,t=40,b=50),
                        paper_bgcolor="#0f0f0f", plot_bgcolor="#0f0f0f")
 st.plotly_chart(fig_line, use_container_width=True)
 
-# ───────────────────── 6. CHOROPLETH (COUNTRY) ──────────────
-import plotly.graph_objects as go
-
-geo_df = (exp[exp.period == 0]                # только новые подписки
-          .groupby(country_col).size()
-          .reset_index(name="New subs"))
-
-geo_df = geo_df[geo_df["New subs"] > 0]       # убираем страны с 0
-
-fig_geo = go.Figure(go.Choropleth(
-    locations   = geo_df[country_col],        # ISO-2 коды
-    z           = geo_df["New subs"],
-    locationmode= "ISO-2",
-    colorscale  = "Blues",
-    marker_line_color = "white",
-    colorbar_title = "New subs"
-))
-fig_geo.update_layout(
-    title_text = "New subscriptions by country",
-    margin     = dict(l=10, r=10, t=40, b=10),
-    geo        = dict(projection_type="natural earth",
-                      bgcolor="#0f0f0f"),
-    paper_bgcolor = "#0f0f0f",
-    plot_bgcolor  = "#0f0f0f"
-)
-
-st.plotly_chart(fig_geo, use_container_width=True)
-
