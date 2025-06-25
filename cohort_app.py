@@ -6,11 +6,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
 
-# ───────── helper for progress-bar in table ─────────
+# ───────── helper for progress-bar inside table ────────────
 def bar(p, w=10):
     return "🟥" * int(round(p / 10)) + "⬜" * (w - int(round(p / 10)))
 
-# ───────── load data ─────────
+# ───────── load TSV ─────────
 FILE = Path(__file__).parent / "subscriptions.tsv"
 
 @st.cache_data(show_spinner=False)
@@ -20,9 +20,11 @@ def load(p: Path) -> pd.DataFrame:
 df_raw = load(FILE)
 df_raw["created_at"] = pd.to_datetime(df_raw["created_at"])
 
-# ───────── UI filters ─────────
+# ─────────── UI filters ───────────
 min_d, max_d = df_raw["created_at"].dt.date.agg(["min", "max"])
-start, end = st.date_input("Date range", [min_d, max_d], min_d, max_d)
+start, end   = st.date_input("Date range", [min_d, max_d], min_d, max_d)
+
+weekly = st.checkbox("Weekly cohorts", False)          # ← переключатель
 
 utm_col, price_col = "user_visit.utm_source", "price.price_option_text"
 sel_utm = st.multiselect(
@@ -36,7 +38,7 @@ sel_price = st.multiselect(
     default=sorted(df_raw[price_col].dropna().unique())
 )
 
-# ───────── filter data ─────────
+# ─────────── filter dataframe ───────────
 df = df_raw[
     (df_raw["real_payment"] == 1) &
     (df_raw["created_at"].dt.date.between(start, end)) &
@@ -44,16 +46,21 @@ df = df_raw[
     (df_raw[price_col].isin(sel_price))
 ].copy()
 
-# ───────── cohort prep (daily) ─────────
-df["cohort_date"] = df["created_at"].dt.date
+# ─────────── define cohort_date (daily / weekly) ───────────
+df["cohort_date"] = (
+    df["created_at"].dt.to_period("W").apply(lambda r: r.start_time.date())
+    if weekly else
+    df["created_at"].dt.date
+)
 
-# explode rows into periods 0..n-1
+# ─────────── expand rows into periods ───────────
 exp = (
     df.loc[df.index.repeat(df["charges_count"].astype(int))]
       .assign(period=lambda d: d.groupby(level=0).cumcount())
 )
 
 size = exp[exp.period == 0].groupby("cohort_date").size()
+
 dead = (
     df[df["next_charge_date"].isna()]
       .groupby("cohort_date").size()
@@ -72,7 +79,7 @@ pivot = exp.pivot_table(index="cohort_date", columns="period",
 ret = pivot.div(size, axis=0).mul(100).round(1)
 pivot.columns = ret.columns = [f"Period {p}" for p in pivot.columns]
 
-# ───────── build retention table ─────────
+# ─────────── build retention table ───────────
 death_cell = (
     "💀 " + death_pct.map(lambda v: f"{v:.1f}%") + " "
     + death_pct.map(bar) + "<br>(" + dead.astype(str) + ")"
@@ -91,7 +98,7 @@ combo.insert(0, "Cohort death", death_cell)
 combo.insert(1, "Revenue USD", revenue.map(lambda v: f"${v:,.2f}"))
 combo["LTV USD"] = ltv.map(lambda v: f"${v:,.2f}")
 
-# TOTAL row
+# TOTAL row (weighted averages)
 weighted = lambda s: (s * size).sum() / size.sum()
 total = {
     "Cohort death": f"💀 {weighted(death_pct):.1f}% {bar(weighted(death_pct))}",
@@ -140,7 +147,7 @@ fig_table.update_layout(margin=dict(l=10, r=10, t=40, b=10),
 st.title("Cohort Retention – real_payment = 1")
 st.plotly_chart(fig_table, use_container_width=True)
 
-# ─────────── UTM line chart ──────────
+# ─────────── UTM line chart ───────────
 new_subs = (
     exp[exp.period == 0]
       .groupby(["cohort_date", utm_col]).size()
@@ -155,15 +162,14 @@ fig_line.update_layout(margin=dict(l=10, r=10, t=40, b=50),
                        paper_bgcolor="#0f0f0f", plot_bgcolor="#0f0f0f")
 st.plotly_chart(fig_line, use_container_width=True)
 
-# ─────────── Cohort LTV (actual, by period) ──────────
-#   cumulative revenue ÷ cohort size  ⇒  LTV per user
+# ─────────── Cohort LTV (actual, by period) ───────────
+# cumulative revenue ÷ cohort size  ⇒  LTV per user
 turnover = exp.groupby(["cohort_date", "period"])["send_event_amount"].sum()
 cohort_ltv = (
     (turnover.div(size, level=0))          # revenue per user in period
       .groupby(level=0).cumsum()           # cumulative
       .reset_index(name="LTV")
 )
-
 fig_coh = px.line(
     cohort_ltv, x="period", y="LTV", color="cohort_date",
     markers=True, line_shape="hv",
@@ -175,7 +181,7 @@ fig_coh.update_layout(margin=dict(l=10, r=10, t=40, b=50),
                       paper_bgcolor="#0f0f0f", plot_bgcolor="#0f0f0f")
 st.plotly_chart(fig_coh, use_container_width=True)
 
-# ─────────── Overall actual LTV curve ──────────
+# ─────────── Overall actual LTV curve ───────────
 period_rev = exp.groupby("period")["send_event_amount"].mean()  # mean per user
 overall_ltv = period_rev.cumsum().round(2)
 fig_ltv = px.line(overall_ltv.reset_index(), x="period", y="send_event_amount",
