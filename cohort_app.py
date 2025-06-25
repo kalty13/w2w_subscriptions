@@ -10,8 +10,7 @@ from pathlib import Path
 FILE = Path(__file__).parent / "subscriptions.tsv"
 
 @st.cache_data(show_spinner=False)
-def load_data(p: Path) -> pd.DataFrame:
-    return pd.read_csv(p, sep="\t")
+def load_data(p): return pd.read_csv(p, sep="\t")
 
 df_raw = load_data(FILE)
 df_raw["created_at"] = pd.to_datetime(df_raw["created_at"])
@@ -30,13 +29,13 @@ price_opts = sorted(df_raw[price_col].dropna().unique())
 sel_utm   = st.multiselect("UTM source", utm_opts, default=utm_opts)
 sel_price = st.multiselect("Price option", price_opts, default=price_opts)
 
-# сценарии retention для моделирования LTV
+# retention-scenarios slider → multiselect
 model_r_pct = st.multiselect(
-    "Model retention per period (%) – выберите 1–3 значения",
+    "Model retention per period (%)",
     options=list(range(10, 101, 10)),
     default=[80, 60, 40]
 )
-model_r = [v / 100 for v in model_r_pct]        # 0–1 доли
+model_r = [v/100 for v in model_r_pct]
 
 # ───────────────────────── 2. FILTER DATA ───────────────────
 df = df_raw[
@@ -52,15 +51,14 @@ df["cohort_date"] = (
     if weekly else df["created_at"].dt.date
 )
 
-# развернём каждую подписку на все оплаченные периоды
 exp = (
     df.loc[df.index.repeat(df["charges_count"].astype(int))]
       .assign(period=lambda d: d.groupby(level=0).cumcount())
 )
 
-size = exp[exp.period == 0].groupby("cohort_date").size()   # cohort size
+size = exp[exp.period == 0].groupby("cohort_date").size()
 
-# Cohort death: next_charge_date IS NULL
+# death by next_charge_date IS NULL
 dead = (
     df[df["next_charge_date"].isna()]
       .groupby("cohort_date")
@@ -69,10 +67,15 @@ dead = (
 )
 death_pct = (dead / size * 100).round(1)
 
-# LTV mean per cohort
+# LTV & Revenue
 ltv = (
     df.groupby("cohort_date")["send_event_amount"].sum()
       .reindex(size.index, fill_value=0) / size
+).round(2)
+
+revenue = (
+    df.groupby("cohort_date")["send_event_amount"].sum()
+      .reindex(size.index, fill_value=0)
 ).round(2)
 
 # Retention matrix
@@ -81,19 +84,29 @@ pivot = exp.pivot_table(index="cohort_date", columns="period",
 ret   = pivot.div(size, axis=0).mul(100).round(1)
 pivot.columns = ret.columns = [f"Period {p}" for p in pivot.columns]
 
-# ───────────────── 4. TABLE WITH HEATMAP CELLS ──────────────
-def bar(p, w=10): return "🟥"*int(round(p/10)) + "⬜"*(w-int(round(p/10)))
+# ───────────────────────── 4. BUILD TABLE ──────────────────
+def bar(p,w=10): return "🟥"*int(round(p/10)) + "⬜"*(w-int(round(p/10)))
 death_cell = (
-    "💀 " + death_pct.map(lambda v: f"{v:.1f}%") + " "
-    + death_pct.map(bar) + "<br>(" + dead.astype(str) + ")"
+    "💀 "+death_pct.map(lambda v:f"{v:.1f}%")+" "
+    + death_pct.map(bar)+"<br>("+dead.astype(str)+")"
 )
 
-combo = ret.astype(str) + "%<br>(" + pivot.astype(str) + ")"
+# custom display for retention cells
+disp = pd.DataFrame(index=ret.index, columns=ret.columns)
+for idx in ret.index:
+    for col in ret.columns:
+        if death_pct.loc[idx] == 100 and ret.loc[idx, col] == 0:
+            disp.loc[idx, col] = "💀"
+        else:
+            disp.loc[idx, col] = f"{ret.loc[idx,col]:.1f}%<br>({pivot.loc[idx,col]})"
+
+combo = disp.copy()
 combo.insert(0, "Cohort death", death_cell)
-combo["LTV USD"] = ltv.map(lambda v: f"${v:,.2f}")
+combo.insert(1, "Revenue USD", revenue.map(lambda v:f"${v:,.2f}"))
+combo["LTV USD"] = ltv.map(lambda v:f"${v:,.2f}")
 combo = combo.sort_index(ascending=False)
 
-# цветовая функция
+# colours
 Y_R,Y_G,Y_B=255,212,0; BASE="#202020"; A0,A1=.2,.8
 rgba = lambda a:f"rgba({Y_R},{Y_G},{Y_B},{a:.2f})"
 txt  = lambda a:"black" if a>0.5 else "white"
@@ -103,18 +116,16 @@ rows,fills,fonts = [], [], []
 
 for ix,row in combo.iterrows():
     rows.append([str(ix)] + row.tolist())
-    c,f = ["#1e1e1e", "#333333"], ["white", "white"]       # Cohort / death
+    c,f = ["#1e1e1e", "#333333", "#333333"], ["white"]*3   # Cohort/death/revenue
     for p in ret.loc[ix].values/100:
         if p==0 or pd.isna(p): c.append(BASE); f.append("white")
-        else:
-            a = A0 + (A1 - A0) * p
-            c.append(rgba(a)); f.append(txt(a))
-    c.append("#333333"); f.append("white")                 # LTV column
+        else: a=A0+(A1-A0)*p; c.append(rgba(a)); f.append(txt(a))
+    c.append("#333333"); f.append("white")                 # LTV
     fills.append(c); fonts.append(f)
 
-vals       = list(map(list, zip(*rows)))
-fill_cols  = list(map(list, zip(*fills)))
-font_cols  = list(map(list, zip(*fonts)))
+vals      = list(map(list, zip(*rows)))
+fill_cols = list(map(list, zip(*fills)))
+font_cols = list(map(list, zip(*fonts)))
 
 fig_table = go.Figure(go.Table(
     header=dict(values=header, fill_color="#303030",
@@ -140,7 +151,7 @@ fig_line = px.line(
     new_subs, x="cohort_date", y="New subs",
     color=utm_col, markers=True,
     title="New subscriptions by UTM source",
-    labels={"cohort_date":"Cohort", utm_col:"UTM source"}
+    labels={"cohort_date": "Cohort", utm_col: "UTM source"}
 )
 fig_line.update_layout(margin=dict(l=10,r=10,t=40,b=50),
                        legend=dict(orientation="h", y=-0.25),
@@ -148,7 +159,6 @@ fig_line.update_layout(margin=dict(l=10,r=10,t=40,b=50),
 st.plotly_chart(fig_line, use_container_width=True)
 
 # ───────────────────── 6. ACTUAL vs MODEL LTV ───────────────
-# средний чек первой оплаты
 avg_payment = exp[exp.period == 0]["send_event_amount"].mean()
 
 overall_size = size.sum()
@@ -159,7 +169,6 @@ actual_retain = (
 )
 actual_ltv = (avg_payment * actual_retain.cumsum()).round(2)
 
-# собираем DataFrame моделей
 model_df = pd.DataFrame({"Period": actual_ltv.index,
                          "Actual LTV": actual_ltv.values})
 
