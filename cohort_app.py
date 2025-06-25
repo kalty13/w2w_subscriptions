@@ -65,8 +65,10 @@ dead = (df[df["next_charge_date"].isna()]
 death_pct = (dead / size * 100).round(1)
 
 # LTV (mean send_event_amount)
-ltv = (df.groupby("cohort_date")["send_event_amount"].sum()
-         .reindex(size.index, 0) / size).round(2)
+ltv = (
+    df.groupby("cohort_date")["send_event_amount"].sum()
+      .reindex(size.index, fill_value=0) / size   # ← fill_value по имени
+).round(2)
 
 # retention pivots
 pivot = exp.pivot_table(index="cohort_date", columns="period",
