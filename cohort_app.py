@@ -121,4 +121,12 @@ weekly_ltv=(weekly_ltv.set_index(["cohort_week","week"])
             .reindex(full_idx).groupby(level=0).ffill().reset_index())
 weekly_ltv["week"]=weekly_ltv["week"].astype(str)
 
-fig_coh=px.line(weekly_ltv,x="week",y="LTV",color="cohort_week",
+fig_coh = px.line(
+    weekly_ltv,
+    x="week",
+    y="LTV",
+    color="cohort_week",
+    line_shape="hv",
+    title="Weekly Cohort LTV (actual)",
+    labels={"week": "Week", "cohort_week": "Cohort"}
+)  # ← ЭТА скобка закрывает px.line
