@@ -131,15 +131,23 @@ fig_line.update_layout(margin=dict(l=10,r=10,t=40,b=50),
 st.plotly_chart(fig_line, use_container_width=True)
 
 # ────────────────── 5. CHOROPLETH BY COUNTRY ────────────────
-geo_df = (exp[exp.period==0]
+geo_df = (exp[exp.period == 0]                       # только новые подписки
           .groupby(country_col).size()
           .reset_index(name="New subs"))
 
-fig_geo = px.choropleth(geo_df, locations=country_col, color="New subs",
-                        color_continuous_scale="Blues",
-                        title="New subscriptions by country",
-                        projection="natural earth")
+geo_df = geo_df[geo_df["New subs"] > 0]              # убираем страны с 0
+
+fig_geo = px.choropleth(
+    geo_df,
+    locations=country_col,
+    color="New subs",
+    color_continuous_scale="Blues",
+    title="New subscriptions by country",
+    projection="natural earth",
+    locationmode="ISO-2"                             # ← КЛЮЧ: коды ISO-2
+)
 fig_geo.update_layout(margin=dict(l=10,r=10,t=40,b=10),
-                      paper_bgcolor="#0f0f0f", plot_bgcolor="#0f0f0f")
+                      paper_bgcolor="#0f0f0f",
+                      plot_bgcolor="#0f0f0f")
 
 st.plotly_chart(fig_geo, use_container_width=True)
