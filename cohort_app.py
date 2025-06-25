@@ -93,7 +93,7 @@ pivot.columns = ret.columns = [f"Period {p}" for p in pivot.columns]
 
 # ─────────── build retention table ───────────
 death_cell = (
-    "💀" + death_pct.map(lambda v: f"{v:.1f}%") + " "
+     death_pct.map(lambda v: f"{v:.1f}%") + " "
     + death_pct.map(bar) + "<br>(" + dead.astype(str) + ")"
 )
 
