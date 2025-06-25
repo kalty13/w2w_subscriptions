@@ -122,7 +122,8 @@ st.title("Cohort Retention – real_payment = 1")
 st.plotly_chart(fig_table, use_container_width=True)
 
 # ───────────────────────── 5. CURVE BELOW TABLE ─────────────
-sel_cohort = st.selectbox("Select cohort for curves", combo.index.astype(str))
+sel_label  = st.selectbox("Select cohort for curves", combo.index.astype(str))
+sel_cohort = pd.to_datetime(sel_label).date()       # ← превратили обратно в date
 
 curve_df = pd.DataFrame({
     "Period": range(len(pivot.columns)),
