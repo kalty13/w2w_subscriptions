@@ -133,9 +133,11 @@ fig_line.update_layout(margin=dict(l=10,r=10,t=40,b=50),
 st.plotly_chart(fig_line, use_container_width=True)
 
 # ───────────────────── 6. CHOROPLETH (COUNTRY) ──────────────
-iso2_to_iso3 = {iso2:data["alpha3"] for iso2,data in _iso3166.items()}
+from plotly.express import _core as pxcore          # ← корректный импорт
 
-geo_df = (exp[exp.period==0]
+iso2_to_iso3 = {iso2: data["alpha3"] for iso2, data in pxcore._iso3166.items()}
+
+geo_df = (exp[exp.period == 0]
           .groupby(country_col).size()
           .reset_index(name="New subs"))
 geo_df["iso3"] = geo_df[country_col].map(iso2_to_iso3)
