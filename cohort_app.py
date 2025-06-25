@@ -24,13 +24,18 @@ weekly       = st.checkbox("Weekly cohorts", False)
 utm_col   = "user_visit.utm_source"
 price_col = "price.price_option_text"
 
-# UTM
-utm_opts = sorted(df_raw[utm_col].dropna().unique())
-sel_utm  = st.multiselect("UTM source", utm_opts, default=utm_opts)
+utm_opts  = sorted(df_raw[utm_col].dropna().unique())
+price_opts= sorted(df_raw[price_col].dropna().unique())
 
-# Price option
-price_opts = sorted(df_raw[price_col].dropna().unique())
-sel_price  = st.multiselect("Price option", price_opts, default=price_opts)
+sel_utm   = st.multiselect("UTM source", utm_opts, default=utm_opts)
+sel_price = st.multiselect("Price option", price_opts, default=price_opts)
+
+# Слайдер сценариев retention для моделирования LTV
+model_r = st.slider(
+    "Model retention per period, % (можно задать 1–3 значения)",
+    min_value=10, max_value=100, value=[80, 60, 40], step=10
+)
+model_r = [v / 100 for v in model_r]                # в долю 0‒1
 
 # ───────────────────────── 2. FILTER DATA ───────────────────
 df = df_raw[
@@ -46,12 +51,15 @@ df["cohort_date"] = (
     if weekly else df["created_at"].dt.date
 )
 
-exp = (df.loc[df.index.repeat(df["charges_count"].astype(int))]
-         .assign(period=lambda d: d.groupby(level=0).cumcount()))
+# Разворачиваем в периоды
+exp = (
+    df.loc[df.index.repeat(df["charges_count"].astype(int))]
+      .assign(period=lambda d: d.groupby(level=0).cumcount())
+)
 
 size = exp[exp.period == 0].groupby("cohort_date").size()
 
-# ── Cohort death по next_charge_date IS NULL ────────────────
+# Cohort death = next_charge_date is NULL (по старой схеме)
 dead = (
     df[df["next_charge_date"].isna()]
       .groupby("cohort_date")
@@ -60,13 +68,13 @@ dead = (
 )
 death_pct = (dead / size * 100).round(1)
 
-# LTV
+# LTV (mean send_event_amount)
 ltv = (
     df.groupby("cohort_date")["send_event_amount"].sum()
       .reindex(size.index, fill_value=0) / size
 ).round(2)
 
-# Retention
+# Retention pivot
 pivot = exp.pivot_table(index="cohort_date", columns="period",
                         aggfunc="size", fill_value=0)
 ret   = pivot.div(size, axis=0).mul(100).round(1)
@@ -84,7 +92,7 @@ combo.insert(0, "Cohort death", death_cell)
 combo["LTV USD"] = ltv.map(lambda v: f"${v:,.2f}")
 combo = combo.sort_index(ascending=False)
 
-# цвета
+# цветовые функции
 Y_R,Y_G,Y_B=255,212,0; BASE="#202020"; A0,A1=.2,.8
 rgba = lambda a:f"rgba({Y_R},{Y_G},{Y_B},{a:.2f})"
 txt  = lambda a:"black" if a>0.5 else "white"
@@ -99,8 +107,7 @@ for ix,row in combo.iterrows():
         if p==0 or pd.isna(p):
             c.append(BASE); f.append("white")
         else:
-            a = A0 + (A1 - A0)*p
-            c.append(rgba(a)); f.append(txt(a))
+            a=A0+(A1-A0)*p; c.append(rgba(a)); f.append(txt(a))
     c.append("#333333"); f.append("white")             # LTV
     fills.append(c); fonts.append(f)
 
@@ -136,3 +143,39 @@ fig_line.update_layout(margin=dict(l=10,r=10,t=40,b=50),
                        legend=dict(orientation="h", y=-0.25),
                        paper_bgcolor="#0f0f0f", plot_bgcolor="#0f0f0f")
 st.plotly_chart(fig_line, use_container_width=True)
+
+# ───────────────────── 6. LTV CURVES ────────────────────────
+# средний первый чек
+avg_payment = df[df["charges_count"] > 0]["send_event_amount"].median()
+
+# фактическая retention (по всем выбранным данным)
+overall_size = size.sum()
+actual_retain = (
+    exp.groupby("period").size()
+      .div(overall_size)
+      .sort_index()
+)
+
+actual_ltv = (avg_payment * actual_retain.cumsum()).round(2)
+
+model_df = pd.DataFrame({"Period": actual_ltv.index,
+                         "Actual LTV": actual_ltv.values})
+
+for r in model_r:
+    model_df[f"Model {int(r*100)}%"] = [
+        round(avg_payment * sum(r**k for k in range(p+1)), 2)
+        for p in model_df["Period"]
+    ]
+
+fig_ltv = px.line(
+    model_df, x="Period",
+    y=[col for col in model_df.columns if col != "Period"],
+    markers=True,
+    title="Actual vs Modelled LTV (USD)",
+    labels={"value": "USD", "variable": ""}
+)
+fig_ltv.update_layout(margin=dict(l=10,r=10,t=40,b=50),
+                      legend=dict(orientation="h", y=-0.25),
+                      paper_bgcolor="#0f0f0f", plot_bgcolor="#0f0f0f")
+
+st.plotly_chart(fig_ltv, use_container_width=True)
