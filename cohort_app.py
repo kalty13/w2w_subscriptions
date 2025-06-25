@@ -58,7 +58,7 @@ for ix in ret.index:
 combo = disp.copy()
 combo.insert(0,"Cohort death",death_cell)
 combo.insert(1,"Revenue USD",revenue.map(lambda v:f"${v:,.2f}"))
-combo["LTV USD"]=ltv.map(lambda v:f${v:,.2f}")
+combo["LTV USD"] = ltv.map(lambda v: f"${v:,.2f}")
 
 # TOTAL
 weighted=lambda s:(s*size).sum()/size.sum()
