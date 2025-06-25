@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
-from plotly.express._core import _iso3166   # для iso-конвертации
+from plotly.express import _core as pxcore          # iso-таблица
 
 # ───────────────────────── 0. LOAD ──────────────────────────
 FILE = Path(__file__).parent / "subscriptions.tsv"
@@ -24,7 +24,7 @@ weekly       = st.checkbox("Weekly cohorts", False)
 
 utm_col     = "user_visit.utm_source"
 price_col   = "price.price_option_text"
-country_col = "user_visit.user_country_code"   # ISO-2 коды
+country_col = "user_visit.user_country_code"   # ISO-2
 
 # UTM filter
 if utm_col in df_raw.columns:
@@ -94,22 +94,22 @@ header=["Cohort"]+combo.columns.tolist()
 rows,fills,fonts=[],[],[]
 for ix,row in combo.iterrows():
     rows.append([str(ix)]+row.tolist())
-    c,f=["#1e1e1e","#333333"],["white","white"]          # Cohort / death
+    c,f=["#1e1e1e","#333333"],["white","white"]
     for p in ret.loc[ix].values/100:
         if p==0 or pd.isna(p): c.append(BASE); f.append("white")
         else: a=A0+(A1-A0)*p; c.append(rgba(a)); f.append(txt(a))
     c.append("#333333"); f.append("white")               # LTV
     fills.append(c); fonts.append(f)
 
-vals  = list(map(list, zip(*rows)))
-fill_cols = list(map(list, zip(*fills)))
-font_cols = list(map(list, zip(*fonts)))
+vals=list(map(list,zip(*rows)))
+fills=list(map(list,zip(*fills)))
+fonts=list(map(list,zip(*fonts)))
 
 fig_table = go.Figure(go.Table(
     header=dict(values=header, fill_color="#303030",
                 font=dict(color="white", size=13), align="center"),
-    cells=dict(values=vals, fill_color=fill_cols,
-               font=dict(size=13, color=font_cols),
+    cells=dict(values=vals, fill_color=fills,
+               font=dict(size=13, color=fonts),
                align="center", height=34)
 ))
 fig_table.update_layout(margin=dict(l=10,r=10,t=40,b=10),
@@ -133,11 +133,9 @@ fig_line.update_layout(margin=dict(l=10,r=10,t=40,b=50),
 st.plotly_chart(fig_line, use_container_width=True)
 
 # ───────────────────── 6. CHOROPLETH (COUNTRY) ──────────────
-from plotly.express import _core as pxcore          # ← корректный импорт
+iso2_to_iso3 = {iso2:data["alpha3"] for iso2,data in pxcore._iso3166.items()}
 
-iso2_to_iso3 = {iso2: data["alpha3"] for iso2, data in pxcore._iso3166.items()}
-
-geo_df = (exp[exp.period == 0]
+geo_df = (exp[exp.period==0]
           .groupby(country_col).size()
           .reset_index(name="New subs"))
 geo_df["iso3"] = geo_df[country_col].map(iso2_to_iso3)
