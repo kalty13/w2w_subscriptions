@@ -11,14 +11,14 @@ from pathlib import Path
 FILE = Path(__file__).parent / "subscriptions.tsv"
 
 @st.cache_data(show_spinner=False)
-def load_data(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path, sep="\t")
+def load_data(p: Path) -> pd.DataFrame:
+    return pd.read_csv(p, sep="\t")
 
 df_raw = load_data(FILE)
 df_raw["created_at"] = pd.to_datetime(df_raw["created_at"])
 
 # ──────────────────────────────────────────
-# 1. UI — filters
+# 1. UI filters
 # ──────────────────────────────────────────
 min_date = df_raw["created_at"].dt.date.min()
 max_date = df_raw["created_at"].dt.date.max()
@@ -38,12 +38,17 @@ if utm_col in df_raw.columns:
     utm_opts = sorted(df_raw[utm_col].dropna().unique())
     selected_utms = st.multiselect("UTM source", utm_opts, default=utm_opts)
 else:
-    st.info(f"No column “{utm_col}” — UTM filter hidden.")
-    selected_utms = None  # фильтр пропускаем
+    st.info(f"No column “{utm_col}” — UTM filter hidden")
+    selected_utms = None
 
-# Subscription ID (price_id)
-sub_opts = sorted(df_raw["price_id"].dropna().unique())
-selected_subs = st.multiselect("Subscription ID (price_id)", sub_opts, default=sub_opts)
+# Price option text
+price_col = "price_price_option_text"
+if price_col in df_raw.columns:
+    price_opts = sorted(df_raw[price_col].dropna().unique())
+    selected_prices = st.multiselect("Price option", price_opts, default=price_opts)
+else:
+    st.info(f"No column “{price_col}” — price filter hidden")
+    selected_prices = None
 
 # ──────────────────────────────────────────
 # 2. Filter dataframe
@@ -55,113 +60,102 @@ df = df_raw[
 
 if selected_utms is not None:
     df = df[df[utm_col].isin(selected_utms)]
-
-df = df[df["price_id"].isin(selected_subs)]
+if selected_prices is not None:
+    df = df[df[price_col].isin(selected_prices)]
 
 # ──────────────────────────────────────────
 # 3. Cohort prep
 # ──────────────────────────────────────────
-if weekly_toggle:
-    df["cohort_date"] = df["created_at"].dt.to_period("W").apply(lambda r: r.start_time.date())
-else:
-    df["cohort_date"] = df["created_at"].dt.date
+df["cohort_date"] = (
+    df["created_at"].dt.to_period("W").apply(lambda r: r.start_time.date())
+    if weekly_toggle else
+    df["created_at"].dt.date
+)
 
-# Cohort size (period 0)
-rows = [
-    (row.cohort_date, p)
-    for _, row in df.iterrows()
-    for p in range(int(row.charges_count))
-]
+# cohort size
+rows = [(row.cohort_date, p)
+        for _, row in df.iterrows()
+        for p in range(int(row.charges_count))]
 exp = pd.DataFrame(rows, columns=["cohort_date", "period"])
 size = exp[exp.period == 0].groupby("cohort_date").size()
 
-# Death = next_charge_date IS NULL
-canceled = (
+# Cohort death (next_charge_date IS NULL)
+dead = (
     df[df["next_charge_date"].isna()]
     .groupby("cohort_date")
     .size()
     .reindex(size.index, fill_value=0)
 )
-death_pct = (canceled / size * 100).round(1)
+death_pct = (dead / size * 100).round(1)
 
-# LTV USD = Σ send_event_amount / cohort size
+# LTV USD = avg send_event_amount
 ltv = (
     df.groupby("cohort_date")["send_event_amount"].sum()
     .reindex(size.index, fill_value=0)
     / size
 ).round(2)
 
-# Retention pivot
-pivot_subs = exp.pivot_table(index="cohort_date", columns="period", aggfunc="size", fill_value=0)
-pivot_pct  = pivot_subs.div(size, axis=0).mul(100).round(1)
+# Retention pivots
+pivot = exp.pivot_table(index="cohort_date", columns="period", aggfunc="size", fill_value=0)
+ret_pct = pivot.div(size, axis=0).mul(100).round(1)
 
-period_cols = [f"Period {p}" for p in pivot_subs.columns]
-pivot_subs.columns = period_cols
-pivot_pct.columns  = period_cols
+period_cols = [f"Period {p}" for p in pivot.columns]
+pivot.columns = period_cols
+ret_pct.columns = period_cols
 
-# ── death-cell with coloured bar 🟥/⬜ ──────────────────────────────
-def bar(p: float, width: int = 10) -> str:
+# ──────────────────────────────────────────
+# 4. Fancy cells
+# ──────────────────────────────────────────
+def bar(p: float, width=10):
     filled = int(round(p / 10))
     return "🟥" * filled + "⬜" * (width - filled)
 
 death_cell = (
-    "💀 "
-    + death_pct.astype(lambda v: f"{v:.1f}%") + " "
-    + death_pct.apply(bar)
-    + "<br>(" + canceled.astype(str) + ")"
+    "💀 " + death_pct.apply(lambda v: f"{v:.1f}%") + " "
+    + death_pct.apply(bar) + "<br>(" + dead.astype(str) + ")"
 )
 
-# ── final table (combo) ────────────────────────────────────────────
-combo = pivot_pct.astype(str) + "%<br>(" + pivot_subs.astype(str) + ")"
+combo = ret_pct.astype(str) + "%<br>(" + pivot.astype(str) + ")"
 combo.insert(0, "Cohort size", size)
 combo.insert(1, "Cohort death", death_cell)
 combo["LTV USD"] = ltv.apply(lambda v: f"${v:,.2f}")
 combo = combo.sort_index(ascending=False)
 
 # ──────────────────────────────────────────
-# 4. Cell colours (yellow alpha 0.2–0.8)
+# 5. Colors for retention cells
 # ──────────────────────────────────────────
 Y_R, Y_G, Y_B = 255, 212, 0
-ALPHA_MIN, ALPHA_MAX = 0.20, 0.80
 BASE = "#202020"
+A_MIN, A_MAX = 0.20, 0.80
 
-def rgba(alpha: float) -> str:
-    return f"rgba({Y_R},{Y_G},{Y_B},{alpha:.2f})"
-
-def txt_color(alpha: float) -> str:
-    return "black" if alpha > 0.5 else "white"
+def rgba(a): return f"rgba({Y_R},{Y_G},{Y_B},{a:.2f})"
+def txt(a):  return "black" if a > 0.5 else "white"
 
 header = ["Cohort"] + combo.columns.tolist()
-table_rows, fill_rows, font_rows = [], [], []
+rows, fills, fonts = [], [], []
 
 for ix, row in combo.iterrows():
-    table_rows.append([str(ix)] + row.tolist())
+    rows.append([str(ix)] + row.tolist())
 
-    pct_vals = pivot_pct.loc[ix].values / 100.0
-    c_row = ["#1e1e1e", "#1e1e1e", "#333333"]   # Cohort / size / death
-    f_row = ["white",   "white",   "white"]
+    c_row = ["#1e1e1e", "#1e1e1e", "#333333"]
+    f_row = ["white"] * 3
 
-    for p in pct_vals:
+    for p in ret_pct.loc[ix].values / 100:
         if pd.isna(p) or p == 0:
-            c_row.append(BASE)
-            f_row.append("white")
+            c_row.append(BASE); f_row.append("white")
         else:
-            alpha = ALPHA_MIN + (ALPHA_MAX - ALPHA_MIN) * p
-            c_row.append(rgba(alpha))
-            f_row.append(txt_color(alpha))
-    c_row.append("#333333")                     # LTV column
-    f_row.append("white")
+            a = A_MIN + (A_MAX - A_MIN)*p
+            c_row.append(rgba(a)); f_row.append(txt(a))
+    c_row.append("#333333"); f_row.append("white")      # LTV col
 
-    fill_rows.append(c_row)
-    font_rows.append(f_row)
+    fills.append(c_row); fonts.append(f_row)
 
-# col-major for Plotly
-values_cols = list(map(list, zip(*table_rows)))
-colors_cols = list(map(list, zip(*fill_rows)))
-fonts_cols  = list(map(list, zip(*font_rows)))
+vals = list(map(list, zip(*rows)))
+fill_cols = list(map(list, zip(*fills)))
+font_cols = list(map(list, zip(*fonts)))
 
 # ──────────────────────────────────────────
-# 5. Plotly table
+# 6. Plotly table
 # ──────────────────────────────────────────
 fig = go.Figure(
     data=[go.Table(
@@ -169,21 +163,18 @@ fig = go.Figure(
             values=header,
             fill_color="#303030",
             font=dict(color="white", size=13),
-            align="center"
-        ),
+            align="center"),
         cells=dict(
-            values=values_cols,
-            fill_color=colors_cols,
+            values=vals,
+            fill_color=fill_cols,
             align="center",
-            font=dict(size=13, color=fonts_cols),
-            height=34
-        )
+            font=dict(size=13, color=font_cols),
+            height=34)
     )],
     layout=go.Layout(
         paper_bgcolor="#0f0f0f",
         plot_bgcolor="#0f0f0f",
-        margin=dict(l=10, r=10, t=40, b=10)
-    )
+        margin=dict(l=10, r=10, t=40, b=10))
 )
 
 suffix = "weekly" if weekly_toggle else "daily"
