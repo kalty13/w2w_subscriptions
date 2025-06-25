@@ -107,7 +107,8 @@ total = {
 for col in ret.columns:
     total[col] = f"{weighted(ret[col]):.1f}%"
 combo.loc["TOTAL"] = total                      # строка-итог
-combo = combo.sort_index(ascending=False)       # TOTAL снизу
+dates_part  = combo.drop("TOTAL").sort_index(ascending=False)  # только даты
+combo       = pd.concat([dates_part, combo.loc[["TOTAL"]]])    # + TOTAL внизу
 
 # ────────────────── 5. COLOURING & PLOT TABLE ──────────────
 Y_R,Y_G,Y_B=255,212,0; BASE="#202020"; A0,A1=.2,.8
