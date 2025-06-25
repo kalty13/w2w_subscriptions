@@ -6,13 +6,13 @@ import plotly.graph_objects as go
 from pathlib import Path
 
 # ──────────────────────────────────────────
-# 0. Загрузка TSV (CSV → уберите sep='\t')
+# 0. Загрузка TSV  (CSV → уберите sep='\t')
 # ──────────────────────────────────────────
 FILE = Path(__file__).parent / "subscriptions.tsv"
 
 @st.cache_data(show_spinner=False)
-def load_data(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path, sep="\t")
+def load_data(p: Path) -> pd.DataFrame:
+    return pd.read_csv(p, sep="\t")
 
 df_raw = load_data(FILE)
 df_raw["created_at"] = pd.to_datetime(df_raw["created_at"])
@@ -32,24 +32,34 @@ start, end = st.date_input(
 
 weekly_toggle = st.checkbox("Weekly cohorts (instead of daily)", value=False)
 
+# UTM source
+utm_opts = sorted(df_raw["utm_source"].dropna().unique())
+selected_utms = st.multiselect("UTM source", utm_opts, default=utm_opts)
+
+# Subscription (price_id)
+sub_opts = sorted(df_raw["price_id"].dropna().unique())
+selected_subs = st.multiselect("Subscription ID (price_id)", sub_opts, default=sub_opts)
+
 # ──────────────────────────────────────────
 # 2. Подготовка данных
 # ──────────────────────────────────────────
 df = df_raw[
     (df_raw["real_payment"] == 1) &
-    (df_raw["created_at"].dt.date.between(start, end))
+    (df_raw["created_at"].dt.date.between(start, end)) &
+    (df_raw["utm_source"].isin(selected_utms)) &
+    (df_raw["price_id"].isin(selected_subs))
 ].copy()
 
+# cohort_date
 if weekly_toggle:
     df["cohort_date"] = (
-        df["created_at"]
-        .dt.to_period("W")
+        df["created_at"].dt.to_period("W")
         .apply(lambda r: r.start_time.date())
     )
 else:
     df["cohort_date"] = df["created_at"].dt.date
 
-# Cohort size (Period 0)
+# cohort size (Period 0)
 rows = [
     (row.cohort_date, p)
     for _, row in df.iterrows()
@@ -58,16 +68,24 @@ rows = [
 exp = pd.DataFrame(rows, columns=["cohort_date", "period"])
 size = exp[exp.period == 0].groupby("cohort_date").size()
 
-# Cohort death
+# cohort death  (нет next_charge_date)
+mask_dead = df["next_charge_date"].isna()
 canceled = (
-    df[df["status"].str.lower() == "canceled"]
+    df[mask_dead]
     .groupby("cohort_date")
     .size()
     .reindex(size.index, fill_value=0)
 )
 death_pct = (canceled / size * 100).round(1)
 
-# Pivot — абсолюты и проценты retention
+# LTV (USD) — средняя выручка на подписку в когорте
+ltv = (
+    df.groupby("cohort_date")["total_revenue_usd"].sum()
+    .reindex(size.index, fill_value=0)
+    / size
+).round(2)
+
+# Pivot retention
 pivot_subs = exp.pivot_table(
     index="cohort_date", columns="period", aggfunc="size", fill_value=0
 )
@@ -77,28 +95,32 @@ period_cols = [f"Period {p}" for p in pivot_subs.columns]
 pivot_subs.columns = period_cols
 pivot_pct.columns  = period_cols
 
-# ── форматируем death-ячейку с баром ───────────────────────────────
+# ── формат death-ячейки с баром 🟥/⬜ ──────────────────────────────
 def bar(p: float, width: int = 10) -> str:
-    filled = int(round(p / 10))             # каждое «деление» = 10 %
-    return "█" * filled + "░" * (width - filled)
+    filled = int(round(p / 10))
+    return "🟥" * filled + "⬜" * (width - filled)
 
-death_formatted = pd.Series(index=size.index, dtype=str)
-for ix in size.index:
-    death_formatted[ix] = (
-        f"💀 {death_pct[ix]:.1f}% {bar(death_pct[ix])}"
-        f"<br>({canceled[ix]})"
-    )
+death_cell = (
+    "💀 "
+    + death_pct.astype(lambda v: f"{v:.1f}%").astype(str)
+    + " "
+    + death_pct.apply(bar)
+    + "<br>("
+    + canceled.astype(str)
+    + ")"
+)
 
-# ── финальная таблица combo ────────────────────────────────────────
+# ── финальная таблица combo ───────────────────────────────────────
 combo = pivot_pct.astype(str) + "%<br>(" + pivot_subs.astype(str) + ")"
 combo.insert(0, "Cohort size", size)
-combo.insert(1, "Cohort death", death_formatted)
+combo.insert(1, "Cohort death", death_cell)
+combo["LTV USD"] = ltv.apply(lambda v: f"${v:,.2f}")
 combo = combo.sort_index(ascending=False)
 
 # ──────────────────────────────────────────
-# 3. Цвета (одноцветный жёлтый)
+# 3. Заливка retention (жёлтый, прозрачный)
 # ──────────────────────────────────────────
-Y_R, Y_G, Y_B = 255, 212, 0     # #FFD400
+Y_R, Y_G, Y_B = 255, 212, 0
 BASE = "#202020"
 ALPHA_MIN, ALPHA_MAX = 0.20, 0.80
 
@@ -115,7 +137,9 @@ for ix, row in combo.iterrows():
     table_rows.append([str(ix)] + row.tolist())
 
     pct_vals = pivot_pct.loc[ix].values / 100.0
-    c_row, f_row = ["#1e1e1e", "#1e1e1e", "#333333"], ["white"]*3
+    #     Cohort   size   death   …retention…   LTV
+    c_row = ["#1e1e1e", "#1e1e1e", "#333333"]
+    f_row = ["white",   "white",   "white"]
 
     for p in pct_vals:
         if pd.isna(p) or p == 0:
@@ -125,6 +149,10 @@ for ix, row in combo.iterrows():
             alpha = ALPHA_MIN + (ALPHA_MAX - ALPHA_MIN) * p
             c_row.append(rgba(alpha))
             f_row.append(txt_color(alpha))
+    # LTV колонка
+    c_row.append("#333333")
+    f_row.append("white")
+
     fill_rows.append(c_row)
     font_rows.append(f_row)
 
