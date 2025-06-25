@@ -40,7 +40,6 @@ df = df_raw[
     (df_raw["created_at"].dt.date.between(start, end))
 ].copy()
 
-# cohort_date
 if weekly_toggle:
     df["cohort_date"] = (
         df["created_at"]
@@ -50,7 +49,7 @@ if weekly_toggle:
 else:
     df["cohort_date"] = df["created_at"].dt.date
 
-# cohort size (Period 0)
+# Cohort size (Period 0)
 rows = [
     (row.cohort_date, p)
     for _, row in df.iterrows()
@@ -59,7 +58,7 @@ rows = [
 exp = pd.DataFrame(rows, columns=["cohort_date", "period"])
 size = exp[exp.period == 0].groupby("cohort_date").size()
 
-# cohort death
+# Cohort death
 canceled = (
     df[df["status"].str.lower() == "canceled"]
     .groupby("cohort_date")
@@ -68,12 +67,9 @@ canceled = (
 )
 death_pct = (canceled / size * 100).round(1)
 
-# pivot absolutes / percents
+# Pivot — абсолюты и проценты retention
 pivot_subs = exp.pivot_table(
-    index="cohort_date",
-    columns="period",
-    aggfunc="size",
-    fill_value=0
+    index="cohort_date", columns="period", aggfunc="size", fill_value=0
 )
 pivot_pct = pivot_subs.div(size, axis=0).mul(100).round(1)
 
@@ -81,38 +77,44 @@ period_cols = [f"Period {p}" for p in pivot_subs.columns]
 pivot_subs.columns = period_cols
 pivot_pct.columns  = period_cols
 
+# ── форматируем death-ячейку с баром ───────────────────────────────
+def bar(p: float, width: int = 10) -> str:
+    filled = int(round(p / 10))             # каждое «деление» = 10 %
+    return "█" * filled + "░" * (width - filled)
+
+death_formatted = pd.Series(index=size.index, dtype=str)
+for ix in size.index:
+    death_formatted[ix] = (
+        f"💀 {death_pct[ix]:.1f}% {bar(death_pct[ix])}"
+        f"<br>({canceled[ix]})"
+    )
+
+# ── финальная таблица combo ────────────────────────────────────────
 combo = pivot_pct.astype(str) + "%<br>(" + pivot_subs.astype(str) + ")"
 combo.insert(0, "Cohort size", size)
-combo.insert(
-    1,
-    "Cohort death",
-    death_pct.astype(str) + "%<br>(" + canceled.astype(str) + ")"
-)
+combo.insert(1, "Cohort death", death_formatted)
 combo = combo.sort_index(ascending=False)
 
 # ──────────────────────────────────────────
-# 3. Одноцветный жёлтый градиент + авто-контраст
+# 3. Цвета (одноцветный жёлтый)
 # ──────────────────────────────────────────
-header = ["Cohort"] + combo.columns.tolist()
-
-Y_R, Y_G, Y_B = 255, 212, 0      # базовый жёлтый #FFD400
-BASE          = "#202020"        # фон для 0 % / NaN
+Y_R, Y_G, Y_B = 255, 212, 0     # #FFD400
+BASE = "#202020"
 ALPHA_MIN, ALPHA_MAX = 0.20, 0.80
 
-def rgba(a: float) -> str:
-    """возвращает rgba-строку фиксированного жёлтого с альфой a"""
-    return f"rgba({Y_R},{Y_G},{Y_B},{a:.2f})"
+def rgba(alpha: float) -> str:
+    return f"rgba({Y_R},{Y_G},{Y_B},{alpha:.2f})"
 
 def txt_color(alpha: float) -> str:
-    """яркость жёлтого при данной α: при >0.5 → чёрный текст, иначе белый"""
     return "black" if alpha > 0.5 else "white"
 
+header = ["Cohort"] + combo.columns.tolist()
 table_rows, fill_rows, font_rows = [], [], []
 
 for ix, row in combo.iterrows():
     table_rows.append([str(ix)] + row.tolist())
 
-    pct_vals  = pivot_pct.loc[ix].values / 100.0
+    pct_vals = pivot_pct.loc[ix].values / 100.0
     c_row, f_row = ["#1e1e1e", "#1e1e1e", "#333333"], ["white"]*3
 
     for p in pct_vals:
@@ -147,7 +149,7 @@ fig = go.Figure(
             fill_color=colors_cols,
             align="center",
             font=dict(size=13, color=fonts_cols),
-            height=32
+            height=34
         )
     )],
     layout=go.Layout(
