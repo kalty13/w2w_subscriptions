@@ -5,16 +5,15 @@ import pandas as pd
 import plotly.graph_objects as go
 from matplotlib import cm
 from pathlib import Path
-from datetime import date
 
 # ──────────────────────────────────────────
-# 0. Загрузка TSV (CSV → уберите sep='\t')
+# 0. Чтение TSV (CSV → уберите sep="\t")
 # ──────────────────────────────────────────
 FILE = Path(__file__).parent / "subscriptions.tsv"
 
 @st.cache_data(show_spinner=False)
-def load_data(p: Path) -> pd.DataFrame:
-    return pd.read_csv(p, sep="\t")
+def load_data(path: Path) -> pd.DataFrame:
+    return pd.read_csv(path, sep="\t")
 
 df_raw = load_data(FILE)
 df_raw["created_at"] = pd.to_datetime(df_raw["created_at"])
@@ -35,16 +34,19 @@ start, end = st.date_input(
 weekly_toggle = st.checkbox("Weekly cohorts (instead of daily)", value=False)
 
 # ──────────────────────────────────────────
-# 2. Фильтрация и подготовка
+# 2. Подготовка данных
 # ──────────────────────────────────────────
 df = df_raw[
     (df_raw["real_payment"] == 1) &
     (df_raw["created_at"].dt.date.between(start, end))
 ].copy()
 
+# Cohort: daily или понедельник недели
 if weekly_toggle:
-    df["cohort_date"] = df["created_at"].dt.to_period("W").apply(
-        lambda r: r.start_time.date()
+    df["cohort_date"] = (
+        df["created_at"]
+        .dt.to_period("W")
+        .apply(lambda r: r.start_time.date())
     )
 else:
     df["cohort_date"] = df["created_at"].dt.date
@@ -58,7 +60,7 @@ rows = [
 exp = pd.DataFrame(rows, columns=["cohort_date", "period"])
 size = exp[exp.period == 0].groupby("cohort_date").size()
 
-# Cohort-death: статус canceled
+# Cohort-death
 canceled = (
     df[df["status"].str.lower() == "canceled"]
     .groupby("cohort_date")
@@ -67,9 +69,12 @@ canceled = (
 )
 death_pct = (canceled / size * 100).round(1)
 
-# Pivot таблицы
+# Pivot абсолюты / проценты
 pivot_subs = exp.pivot_table(
-    index="cohort_date", columns="period", aggfunc="size", fill_value=0
+    index="cohort_date",
+    columns="period",
+    aggfunc="size",
+    fill_value=0
 )
 pivot_pct = pivot_subs.div(size, axis=0).mul(100).round(1)
 
@@ -77,45 +82,60 @@ period_cols = [f"Period {p}" for p in pivot_subs.columns]
 pivot_subs.columns = period_cols
 pivot_pct.columns  = period_cols
 
+# Композит «%<br>(abs)»
 combo = pivot_pct.astype(str) + "%<br>(" + pivot_subs.astype(str) + ")"
 combo.insert(0, "Cohort size", size)
-combo.insert(1, "Cohort death", death_pct.astype(str) + "%<br>(" + canceled.astype(str) + ")")
+combo.insert(
+    1,
+    "Cohort death",
+    death_pct.astype(str) + "%<br>(" + canceled.astype(str) + ")"
+)
 combo = combo.sort_index(ascending=False)
 
 # ──────────────────────────────────────────
-# 3. Формируем values и цвета
+# 3. Цвета + авто-контраст
 # ──────────────────────────────────────────
 header = ["Cohort"] + combo.columns.tolist()
-table_rows, row_colors, font_rows = [], [], []
-cmap = cm.get_cmap("YlGnBu_r")       # спокойный градиент
-BASE = "#202020"
+cmap   = cm.get_cmap("viridis")          # спокойный градиент
+BASE   = "#202020"                       # фон пустых клеток
 
-def txt_color(r, g, b):
-    return "black" if (0.299*r + 0.587*g + 0.114*b) > 128 else "white"
+def rgba_str(r, g, b, a) -> str:
+    return f"rgba({int(r*255)},{int(g*255)},{int(b*255)},{a:.2f})"
+
+def color_for(p: float) -> str:
+    """ p∊[0,1] → цвет viridis со сильной прозрачностью """
+    r, g, b, _ = cmap(p)
+    alpha = 0.25 + 0.4 * p               # 0 → 0.25, 1 → 0.65
+    return rgba_str(r, g, b, alpha)
+
+def txt_color(r, g, b) -> str:
+    # YIQ яркость: >150 → чёрный текст, иначе белый
+    return "black" if (0.299*r + 0.587*g + 0.114*b) > 150 else "white"
+
+table_rows, fill_rows, font_rows = [], [], []
 
 for ix, row in combo.iterrows():
-    # values
     table_rows.append([str(ix)] + row.tolist())
 
     pct_vals = pivot_pct.loc[ix].values / 100.0
-    color_row = ["#1e1e1e", "#1e1e1e", "#333333"]  # Cohort / size / death
-    font_row  = ["white", "white", "white"]
+    c_row, f_row = ["#1e1e1e", "#1e1e1e", "#333333"], ["white"]*3
 
     for p in pct_vals:
         if pd.isna(p) or p == 0:
-            color_row.append(BASE)
-            font_row.append("white")
+            c_row.append(BASE)
+            f_row.append("white")
         else:
-            r, g, b, a = cmap(0.25 + 0.75 * p)     # тёмная часть палитры
-            color_row.append(
-                f"rgba({int(r*255)},{int(g*255)},{int(b*255)},{max(a,0.8):.2f})"
-            )
-            font_row.append(txt_color(int(r*255), int(g*255), int(b*255)))
-    row_colors.append(color_row)
-    font_rows.append(font_row)
+            rgba   = color_for(p)
+            r, g, b = [int(x) for x in rgba[5:-1].split(",")[:3]]
+            c_row.append(rgba)
+            f_row.append(txt_color(r, g, b))
 
+    fill_rows.append(c_row)
+    font_rows.append(f_row)
+
+# Транспонируем в колонки (Plotly Table ждёт col-major)
 values_cols = list(map(list, zip(*table_rows)))
-colors_cols = list(map(list, zip(*row_colors)))
+colors_cols = list(map(list, zip(*fill_rows)))
 fonts_cols  = list(map(list, zip(*font_rows)))
 
 # ──────────────────────────────────────────
